@@ -1,0 +1,29 @@
+Date: 2012-06-30
+Author: Ryan Child
+Title: id3dump
+
+This directory contains a Tcl script for reading MP3 files and dumping the ID3
+tags contained within. This script is an exercise in getting to know the Tool
+Command Language (Tcl), specifically the following areas: 
+
+- File I/O
+- String formatting
+- Binary scanning
+- Lists
+- Arrays
+- Error handling
+
+It is written to be compatible with the Tcl 8.4 interpreter. It has thus far
+only been tested on Linux 32-bit. To run, simply type "./id3dump <filename>"
+(without the quotes) from this directory at the command line, replacing
+<filename> with the path to the MP3 file that contains the ID3 tags you would
+like to dump. Alternatively, you may invoke the Tcl shell explicitly by typing
+"tclsh id3dump <filename>"
+
+The following references were consulted in writing this script:
+
+- Practical Programming in Tcl and Tk, Fourth Edition
+  by Ken Jones and Brent Welch
+- Tcl 8.4 documentation: http://www.tcl.tk/man/tcl8.4/
+- ID3 tag version 2.3.0 Standard: http://www.id3.org/id3v2.3.0
+- Whatever Google turned up
