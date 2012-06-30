@@ -1,6 +1,9 @@
 Date: 2012-06-30
-Author: Ryan Child
+Author: Ryan Child (ryan.child@gmail.com)
 Title: id3dump
+
+For information on copying this software please see the COPYING file in this
+directory
 
 This directory contains a Tcl script for reading MP3 files and dumping the ID3
 tags contained within. This script is an exercise in getting to know the Tool
