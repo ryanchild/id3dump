@@ -18,7 +18,7 @@
 
 proc PrintTags {arrlist} {
   array set arr $arrlist
-  set colwidths [list 30 10]
+  set colwidths {30 10}
   set sep +
   foreach w $colwidths {
     append sep -[string repeat - $w]-+
@@ -68,7 +68,7 @@ set i 0
 while {$i < 4} {
   binary scan [read $fd 1] B* tmp
   if {[string index $tmp 0] ne "0"} {ErrNotID3}
-  append bitstring [string range $tmp 2 end]
+  append bitstring [string range $tmp 1 end]
   incr i
 }
 binary scan [binary format B* $bitstring] I size
