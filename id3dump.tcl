@@ -23,15 +23,15 @@ proc shift {lst count} {
   incr c -1
 }
 
-proc UsageString {} {
+proc Usage_String {} {
   global argv0
-  # keep synced with ParseArgs
+  # keep synced with Parse_Args
   set optionalArgs [list --verbose --dump-cover]
   set str "usage: $argv0 \[[join $optionalArgs "\] \["]\] file"
   return $str
 }
 
-proc ParseArgs {} {
+proc Parse_Args {} {
   global argv gSettings
   foreach arg $argv {
     switch -exact -- $arg {
@@ -59,7 +59,7 @@ proc ParseArgs {} {
   }
 }
 
-proc GetSetting {s} {
+proc Get_Setting {s} {
   global gSettings
   if {[info exists gSettings($s)]} {
     return $gSettings($s)
@@ -103,8 +103,22 @@ proc ID3_Read_Header {fd} {
   set gID3Data($fd,header) $data
 }
 
-proc ID3_Open {fname} {
+proc ID3_Add_Frame {fd id header data} {
+  global gID3Data
+
+  set gID3Data($fd,$gID3Data($fd,currHandle),id) $id
+  set gID3Data($fd,$gID3Data($fd,currHandle),header) $header
+  set gID3Data($fd,$gID3Data($fd,currHandle),data) $data
+  set gID3Data($fd,h$id) $gID3Data($fd,currHandle)
+
+  incr gID3Data($fd,size) [string length $header]
+  incr gID3Data($fd,size) [string length $data]
+  incr gID3Data($fd,currHandle)
+}
+
+proc ID3_Open {fname {debug 0}} {
   global gID3Data 
+
   set fd [open $fname]
   fconfigure $fd -translation binary
   set gID3Data($fd,currHandle) 0
@@ -114,25 +128,18 @@ proc ID3_Open {fname} {
     error "valid ID3 header not found in \"$fname\""
   }
   while {$gID3Data($fd,size) < $gID3Data($fd,sizeInHeader)} {
-    binary scan [read $fd 4] A* id
-    binary scan [read $fd 4] I size
-    binary scan [read $fd 2] S flags
+    set frameHeader [read $fd 10]
+    binary scan $frameHeader A4 id
+    binary scan $frameHeader @4I size
     set data [read $fd $size]
 
-    set gID3Data($fd,$gID3Data($fd,currHandle),id) $id
-    set gID3Data($fd,$gID3Data($fd,currHandle),size) $size
-    set gID3Data($fd,$gID3Data($fd,currHandle),flags) $flags
-    set gID3Data($fd,$gID3Data($fd,currHandle),data) $data
-    set gID3Data($fd,h$id) $gID3Data($fd,currHandle)
-    incr gID3Data($fd,size) [expr $size + 10] ;# we also read the header
-    incr gID3Data($fd,currHandle)
-    lappend gID3Data($fd,frames) $id
+    ID3_Add_Frame $fd $id $frameHeader $data
 
-    if {[GetSetting verbose]} {
+    if {$debug} {
       puts "Read $id frame: $size bytes"
     }
   }
-  if {[GetSetting verbose]} {
+  if {[Get_Setting verbose]} {
     puts "ID3 Size: $gID3Data($fd,sizeInHeader) \
           (read $gID3Data($fd,size) bytes)\n"
   }
@@ -146,15 +153,13 @@ proc ID3_Close {fd} {
       unset gID3Data($fd,h$gID3Data($fd,$i,id))
     }
     unset gID3Data($fd,$i,id)
-    unset gID3Data($fd,$i,size)
-    unset gID3Data($fd,$i,flags)
     unset gID3Data($fd,$i,data)
+    unset gID3Data($fd,$i,header)
   }
   unset gID3Data($fd,size)
   unset gID3Data($fd,sizeInHeader)
   unset gID3Data($fd,currHandle)
   unset gID3Data($fd,header)
-  unset gID3Data($fd,frames)
   close $fd
 }
 
@@ -178,45 +183,39 @@ proc ID3_Write_Frames {fd} {
   }
 }
 
-proc ID3_Get_Data {fd frameid} {
+proc ID3_Get_Frame_Handle {fd id} {
   global gID3Data
-  set handle $gID3Data($fd,h$frameid)
+  return $gID3Data($fd,h$id)
+}
+
+proc ID3_Get_Frame_ID {fd handle} {
+  global gID3Data
+  return $gID3Data($fd,$handle,id)
+}
+
+proc ID3_Get_Frame_Header {fd handle} {
+  global gID3Data
+  return $gID3Data($fd,$handle,header)
+}
+
+proc ID3_Get_Frame_Data {fd handle} {
+  global gID3Data
   return $gID3Data($fd,$handle,data)
 }
 
-proc ID3_Get_Frames {id} {
-  global gID3Data
-  return $gID3Data($id,frames)
-}
-
-proc ID3_Have_Frame {fd frameid} {
-  global gID3Data
-  return [info exists gID3Data($fd,h$frameid)]
-}
-
-proc ID3_Get_Text {fd frameid} {
-  if {[string range $frameid 0 0] ne "T"} {
-    error "only able to get text values from frame IDs that start with 'T'"
-  }
-  binary scan [ID3_Get_Data $fd $frameid] A* txt
+proc ID3_Get_Frame_Text {fd handle} {
+  binary scan [ID3_Get_Frame_Data $fd $handle] A* txt
   return [string range $txt 1 end] ;# skip text encoding byte
 }
 
-proc ID3_Print_Header {fd} {
+proc ID3_Get_Header {fd} {
   global gID3Data
-  upvar 0 $gID3Data($fd,header) data
-
-  binary scan $data @3c major 
-  binary scan $data @4c rev
-  binary scan $headerData @5c flags
-  set unsync [expr $flags & 0x80]]
-  set extendedHeader [expr $flags & 0x40]
-  set experimental [expr $flags & 0x20]
-  set size [ID3_Size_To_Int [string range $data end-4 end]]
+  return $gID3Data($fd,header)
 }
 
-proc ID3_Dump_Artwork {fd} {
-  set data [ID3_Get_Data $fd APIC]
+proc ID3_Dump_Cover {fd} {
+  set handle [ID3_Get_Frame_Handle $fd APIC]
+  set data [ID3_Get_Frame_Data $fd $handle]
 
   set idx 1
   set mime [lindex [split [string range $data $idx end] \x00] 0]
@@ -231,62 +230,39 @@ proc ID3_Dump_Artwork {fd} {
   close $out
 }
 
-proc InitTable {} {
-  global gTableSep gTableFmt gTableWidth
-  set colWidths {50 30}
-  set gTableWidth 5 ;# margins
+proc Print_Table {title cols colWidths rows} {
+  set width -1
+  set sep +
+  set fmt "|"
   foreach w $colWidths {
-    incr gTableWidth $w
+    append sep -[string repeat - $w]-+
+    incr width [expr $w + 3] ;# margins
+    append fmt " %-${w}s |"
   }
-  if {![info exists gTableSep]} {
-    set gTableSep +
-    foreach w $colWidths {
-      append gTableSep -[string repeat - $w]-+
-    }
-  }
-  if {![info exists gTableFmt]} {
-    set gTableFmt "| %-[lindex $colWidths 0]s | %-[lindex $colWidths 1]s |"
-  }
-}
-
-proc PrintTableHeader {title {header {Field Value}}} {
-  global gTableWidth gTableSep gTableFmt
-  puts +[string repeat - $gTableWidth]+
-  set diff [expr $gTableWidth - [string length $title]]
+  puts +[string repeat - $width]+
+  set diff [expr $width - [string length $title]]
   set padLeft [expr $diff / 2]
   set padRight [expr $padLeft + [expr $diff % 2]]
   set title [string repeat " " $padLeft]$title[string repeat " " $padRight]
   puts |$title|
-  puts $gTableSep
-  puts [format $gTableFmt [lindex $header 0] [lindex $header 1]]
-  puts $gTableSep
-}
-
-proc PrintTableFooter {} {
-  global gTableSep
-  puts $gTableSep\n
-}
-
-proc PrintTableRow {field value} {
-  global gTableFmt
-  puts [format $gTableFmt $field $value]
-}
-
-proc PrintTable {title rows {header {Field Value}}} {
-  PrintTableHeader $title $header
+  puts $sep
+  puts [eval format \$fmt $cols]
+  puts $sep
   foreach r $rows {
-    PrintTableRow [lindex $r 0] [lindex $r 1]
+    puts [eval format \$fmt $r]
   }
-  PrintTableFooter
+  puts $sep
 }
 
-if {[catch {ParseArgs} err]} {
+# begin program
+
+if {[catch {Parse_Args} err]} {
   puts stderr $err
-  puts stderr [UsageString]
+  puts stderr [Usage_String]
   exit 1
 }
 
-if {[catch {set id3 [ID3_Open [GetSetting fname]]} err]} {
+if {[catch {set id3 [ID3_Open [Get_Setting fname] [Get_Setting verbose]]} err]} {
   puts stderr $err
   exit 1
 }
@@ -295,24 +271,84 @@ set scriptdir [file dirname [info script]]
 source [file join $scriptdir frameids.tcl]
 source [file join $scriptdir genres.tcl]
 
-InitTable
+for {set i 0} {$i < [ID3_Num_Frames $id3]} {incr i} {
+  set fid [ID3_Get_Frame_ID $id3 $i]
 
-foreach fid [ID3_Get_Frames $id3] {
+  if {[Get_Setting verbose]} {
+    set header [ID3_Get_Frame_Header $id3 $i]
+    binary scan $header @4I size
+    binary scan $header @8S flags
+    lappend headertbl [list $fid $size \
+      [expr $flags & 0x8000] \
+      [expr $flags & 0x4000] \
+      [expr $flags & 0x2000] \
+      [expr $flags & 0x0080] \
+      [expr $flags & 0x0040] \
+      [expr $flags & 0x0020]]
+  }
+
   if {[info exists frameids($fid)]} {
-    set txt [ID3_Get_Text $id3 $fid]
+    set txt [ID3_Get_Frame_Text $id3 $i]
     if {$fid eq "TCON"} {
       catch {
         set txt $genres([lindex [regexp -inline {\((\d\d)\)} $txt] 1])
       }
     }
-    lappend tbl [list "$fid ($frameids($fid))" $txt]
+    lappend txttbl [list "$fid ($frameids($fid))" $txt]
   } 
 }
 
-PrintTable "ID3 Text Information Frames" $tbl {"Frame" "Value"}
+Print_Table "ID3 Text Information Frames" {Frame Value} {50 30} $txttbl
 
-if {[GetSetting dump_cover]} {
-  ID3_Dump_Artwork $id3
+if {[Get_Setting verbose]} {
+  set header [ID3_Get_Header $id3]
+  binary scan $header A3 fileident
+  binary scan $header @3c major
+  binary scan $header @4c rev
+  binary scan $header @5c flags
+  set size [ID3_Size_To_Int [string range $header end-3 end]]
+
+  puts {}
+  Print_Table "ID3 Header Info" \
+    {Field Value} \
+    {30    8    } \
+    [list [list "File identifier"        $fileident] \
+          [list "Version"                v${major}.${rev}] \
+          [list "Size"                   $size] \
+          [list "Unsynchronization"      [expr $flags & 0x80]] \
+          [list "Extended header"        [expr $flags & 0x40]] \
+          [list "Experimental indicator" [expr $flags & 0x20]]]
+
+  puts {}
+  Print_Table "Frame Header Info" \
+    {Frame Size a b c i j k} \
+    {5     9    1 1 1 1 1 1} \
+    $headertbl
+  puts \
+"
+Flags
+--------------------------------------------------
+a - Tag alter preservation
+      0   Frame should be preserved
+      1   Frame should be discarded
+b - File alter preservation
+      0   Frame should be preserved
+      1   Frame should be discarded
+c - Read only
+i - Compression
+      0   Frame is not compressed
+      1   Frame is compressed using zlib
+j - Encryption
+      0   Frame is not encrypted
+      1   Frame is encrypted
+k - Grouping identity
+      0   Frame does not contain group information
+      1   Frame contains group information
+"
+}
+
+if {[Get_Setting dump_cover]} {
+  ID3_Dump_Cover $id3
 }
 
 ID3_Close $id3
