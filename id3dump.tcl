@@ -123,25 +123,35 @@ proc ID3_Open {fname {debug 0}} {
   fconfigure $fd -translation binary
   set gID3Data($fd,currHandle) 0
   set gID3Data($fd,size) 0
+  set gID3Data($fd,padding) 0
 
   if {[catch {ID3_Read_Header $fd}]} {
     error "valid ID3 header not found in \"$fname\""
   }
   while {$gID3Data($fd,size) < $gID3Data($fd,sizeInHeader)} {
-    set frameHeader [read $fd 10]
-    binary scan $frameHeader A4 id
-    binary scan $frameHeader @4I size
-    set data [read $fd $size]
+    set frameHeader [read $fd 1]
+    if {$frameHeader == [string repeat \x00 1]} {
+      set gID3Data($fd,padding) \
+          [expr $gID3Data($fd,sizeInHeader) - $gID3Data($fd,size)]
+      seek $fd $gID3Data($fd,sizeInHeader)
+      break
+    } else {
+      append frameHeader [read $fd 9]
+        
+      binary scan $frameHeader A4 id
+      binary scan $frameHeader @4I size
+      set data [read $fd $size]
 
-    ID3_Add_Frame $fd $id $frameHeader $data
+      ID3_Add_Frame $fd $id $frameHeader $data
 
-    if {$debug} {
-      puts "Read $id frame: $size bytes"
+      if {$debug} {
+        puts "Read $id frame: $size bytes"
+      }
     }
   }
-  if {[Get_Setting verbose]} {
+  if {$debug} {
     puts "ID3 Size: $gID3Data($fd,sizeInHeader) \
-          (read $gID3Data($fd,size) bytes)\n"
+          (read $gID3Data($fd,size) bytes, $gID3Data($fd,padding) bytes padding)\n"
   }
   return $fd
 }
@@ -298,7 +308,7 @@ for {set i 0} {$i < [ID3_Num_Frames $id3]} {incr i} {
   } 
 }
 
-Print_Table "ID3 Text Information Frames" {Frame Value} {50 30} $txttbl
+Print_Table "ID3 Text Information Frames" {Frame Value} {50 40} $txttbl
 
 if {[Get_Setting verbose]} {
   set header [ID3_Get_Header $id3]
