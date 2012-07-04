@@ -227,11 +227,12 @@ proc ID3_Dump_Cover {fd} {
   set handle [ID3_Get_Frame_Handle $fd APIC]
   set data [ID3_Get_Frame_Data $fd $handle]
 
-  set idx 1
+  set idx 1 ;# skip encoding
   set mime [lindex [split [string range $data $idx end] \x00] 0]
-  incr idx [expr [string length $mime] + 1]
+  incr idx [expr [string length $mime] + 1] ;# skip null byte
+  incr idx ;# skip picture type
   set desc [lindex [split [string range $data  $idx end] \x00] 0]
-  incr idx [expr [string length $desc] + 1]
+  incr idx [expr [string length $desc] + 1] ;# skip null byte
 
   set fname cover.[string range $mime [expr [string first / $mime] + 1] end]
   set out [open $fname w]
