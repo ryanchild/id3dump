@@ -1,3 +1,4 @@
+# obtained from http://www.id3.org/id3v2.3.0 2012.07.03
 array set genres {
    1 "Classic Rock"
    2 "Country"
@@ -5,7 +6,7 @@ array set genres {
    4 "Disco"
    5 "Funk"
    6 "Grunge"
-   7 "Hip-Hop""
+   7 "Hip-Hop"
    8 "Jazz"
    9 "Metal"
   10 "New Age"
