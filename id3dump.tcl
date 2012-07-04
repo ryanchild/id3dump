@@ -32,7 +32,7 @@ proc Usage_String {} {
 }
 
 proc Parse_Args {} {
-  global argv gSettings
+  global argc argv gSettings
   foreach arg $argv {
     switch -exact -- $arg {
       --verbose {
