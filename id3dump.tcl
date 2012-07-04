@@ -186,7 +186,7 @@ proc ID3_Open {fname {debug 0}} {
   }
   if {$debug} {
     puts "ID3 Size: $gID3Data($fd,sizeInHeader) \
-          (read $gID3Data($fd,size) bytes, $gID3Data($fd,padding) bytes padding)\n"
+          (read $gID3Data($fd,size) bytes, $gID3Data($fd,padding) bytes padding)"
   }
   return $fd
 }
@@ -230,6 +230,9 @@ proc ID3_Write_Frames {fd} {
 
 proc ID3_Get_Frame_Handle {fd id} {
   global gID3Data
+  if {![info exists gID3Data($fd,h$id)]} {
+    error "frame id \"$id\" not found"
+  }
   return $gID3Data($fd,h$id)
 }
 
@@ -322,11 +325,19 @@ if {[catch {set id3 [ID3_Open [Get_Setting fname] [Get_Setting verbose]]} err]} 
   exit 1
 }
 
+if {[Get_Setting dump_cover]} {
+  if {[catch {ID3_Dump_Cover $id3}]} {
+    puts -nonewline stderr "\nunable to dump cover: cannot find cover in "
+    puts stderr "\"[Get_Setting fname]\""
+  }
+}
+
 set scriptdir [file dirname [info script]]
 source [file join $scriptdir frameids.tcl]
 source [file join $scriptdir genres.tcl]
 set version [ID3_Get_Version $id3]
 
+puts {}
 for {set i 0} {$i < [ID3_Num_Frames $id3]} {incr i} {
   set fid [ID3_Get_Frame_ID $id3 $i]
 
@@ -353,6 +364,8 @@ for {set i 0} {$i < [ID3_Num_Frames $id3]} {incr i} {
       catch {
         set txt $genres([lindex [regexp -inline {\((\d\d)\)} $txt] 1])
       }
+    } elseif {$fid eq "TLEN"} {
+      set txt "[expr $txt / 1000] s"
     }
     puts "$fid ($frameids($fid)): $txt"
   } 
@@ -414,10 +427,6 @@ k - Grouping identity
       1   Frame contains group information
 "
   }
-}
-
-if {[Get_Setting dump_cover]} {
-  ID3_Dump_Cover $id3
 }
 
 ID3_Close $id3
