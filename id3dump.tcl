@@ -116,6 +116,40 @@ proc ID3_Add_Frame {fd id header data} {
   incr gID3Data($fd,currHandle)
 }
 
+proc ID3_Get_Header {fd} {
+  global gID3Data
+  return $gID3Data($fd,header)
+}
+
+proc ID3_Get_Version {fd} {
+  set header [ID3_Get_Header $fd]
+  binary scan $header @3c major
+  binary scan $header @4c rev
+  return 2.${major}.${rev}
+}
+
+proc ID3_Extract_Frame_Size {header version} {
+  switch $version {
+    2.2.0 {
+      binary scan $header @3B24 sizestring
+      binary scan [binary format B32 [string repeat 0 8]$sizestring] I size
+    }
+    2.3.0 {
+      binary scan $header @4I size
+    }
+  }
+  return $size
+}
+
+proc ID3_Extract_Frame_ID {header version} {
+  switch $version {
+    2.2.0 { set fmt A3 }
+    2.3.0 { set fmt A4 }
+  }
+  binary scan $header $fmt id
+  return $id
+}
+
 proc ID3_Open {fname {debug 0}} {
   global gID3Data 
 
@@ -136,14 +170,15 @@ proc ID3_Open {fname {debug 0}} {
       seek $fd $gID3Data($fd,sizeInHeader)
       break
     } else {
-      append frameHeader [read $fd 9]
-        
-      binary scan $frameHeader A4 id
-      binary scan $frameHeader @4I size
+      set version [ID3_Get_Version $fd]
+      switch $version {
+        2.2.0 { append frameHeader [read $fd 5] }
+        2.3.0 { append frameHeader [read $fd 9] }
+      }
+      set size [ID3_Extract_Frame_Size $frameHeader $version]
+      set id [ID3_Extract_Frame_ID $frameHeader $version]
       set data [read $fd $size]
-
       ID3_Add_Frame $fd $id $frameHeader $data
-
       if {$debug} {
         puts "Read $id frame: $size bytes"
       }
@@ -218,23 +253,32 @@ proc ID3_Get_Frame_Text {fd handle} {
   return [string range $txt 1 end] ;# skip text encoding byte
 }
 
-proc ID3_Get_Header {fd} {
-  global gID3Data
-  return $gID3Data($fd,header)
-}
-
 proc ID3_Dump_Cover {fd} {
-  set handle [ID3_Get_Frame_Handle $fd APIC]
+  set version [ID3_Get_Version $fd]
+  switch $version {
+    2.2.0 { set fid PIC }
+    2.3.0 { set fid APIC }
+  }
+  set handle [ID3_Get_Frame_Handle $fd $fid]
   set data [ID3_Get_Frame_Data $fd $handle]
 
   set idx 1 ;# skip encoding
-  set mime [lindex [split [string range $data $idx end] \x00] 0]
-  incr idx [expr [string length $mime] + 1] ;# skip null byte
+  switch $version {
+    2.2.0 { 
+      binary scan $data @${idx}A3 ext
+      incr idx 3
+    }
+    2.3.0 {
+      set mime [lindex [split [string range $data $idx end] \x00] 0]
+      incr idx [expr [string length $mime] + 1] ;# skip null byte
+      set ext [string range $mime [expr [string first / $mime] + 1] end]
+    }
+  }
   incr idx ;# skip picture type
   set desc [lindex [split [string range $data  $idx end] \x00] 0]
   incr idx [expr [string length $desc] + 1] ;# skip null byte
 
-  set fname cover.[string range $mime [expr [string first / $mime] + 1] end]
+  set fname cover.[string tolower $ext]
   set out [open $fname w]
   fconfigure $out -translation binary -encoding binary
   puts $out [string range $data $idx end]
@@ -281,21 +325,26 @@ if {[catch {set id3 [ID3_Open [Get_Setting fname] [Get_Setting verbose]]} err]} 
 set scriptdir [file dirname [info script]]
 source [file join $scriptdir frameids.tcl]
 source [file join $scriptdir genres.tcl]
+set version [ID3_Get_Version $id3]
 
 for {set i 0} {$i < [ID3_Num_Frames $id3]} {incr i} {
   set fid [ID3_Get_Frame_ID $id3 $i]
 
   if {[Get_Setting verbose]} {
     set header [ID3_Get_Frame_Header $id3 $i]
-    binary scan $header @4I size
-    binary scan $header @8S flags
-    lappend headertbl [list $fid $size \
-      [expr $flags & 0x8000] \
-      [expr $flags & 0x4000] \
-      [expr $flags & 0x2000] \
-      [expr $flags & 0x0080] \
-      [expr $flags & 0x0040] \
-      [expr $flags & 0x0020]]
+    set size [ID3_Extract_Frame_Size $header $version]
+    set headertblrow [list $fid $size]
+    if {$version eq "2.3.0"} {
+      binary scan $header @8S flags
+      lappend headertblrow \
+        [expr $flags & 0x8000] \
+        [expr $flags & 0x4000] \
+        [expr $flags & 0x2000] \
+        [expr $flags & 0x0080] \
+        [expr $flags & 0x0040] \
+        [expr $flags & 0x0020]
+    }
+    lappend headertbl $headertblrow
   }
 
   if {[info exists frameids($fid)]} {
@@ -305,37 +354,45 @@ for {set i 0} {$i < [ID3_Num_Frames $id3]} {incr i} {
         set txt $genres([lindex [regexp -inline {\((\d\d)\)} $txt] 1])
       }
     }
-    lappend txttbl [list "$fid ($frameids($fid))" $txt]
+    puts "$fid ($frameids($fid)): $txt"
   } 
 }
-
-Print_Table "ID3 Text Information Frames" {Frame Value} {50 40} $txttbl
 
 if {[Get_Setting verbose]} {
   set header [ID3_Get_Header $id3]
   binary scan $header A3 fileident
-  binary scan $header @3c major
-  binary scan $header @4c rev
   binary scan $header @5c flags
   set size [ID3_Size_To_Int [string range $header end-3 end]]
 
   puts {}
-  Print_Table "ID3 Header Info" \
-    {Field Value} \
-    {30    8    } \
-    [list [list "File identifier"        $fileident] \
-          [list "Version"                v${major}.${rev}] \
-          [list "Size"                   $size] \
-          [list "Unsynchronization"      [expr $flags & 0x80]] \
-          [list "Extended header"        [expr $flags & 0x40]] \
-          [list "Experimental indicator" [expr $flags & 0x20]]]
+  switch $version {
+    2.2.0 {
+      set fields [list [list "File identifier"        $fileident] \
+                       [list "Version"                v$version] \
+                       [list "Size"                   $size] \
+                       [list "Unsynchronization"      [expr $flags & 0x80]] \
+                       [list "Compression"            [expr $flags & 0x40]]]
+      set frame_info_cols {Frame Size}
+      set frame_info_widths {5 9}
+    }
+    2.3.0 {
+      set fields [list [list "File identifier"        $fileident] \
+                       [list "Version"                v$version] \
+                       [list "Size"                   $size] \
+                       [list "Unsynchronization"      [expr $flags & 0x80]] \
+                       [list "Extended header"        [expr $flags & 0x40]] \
+                       [list "Experimental indicator" [expr $flags & 0x20]]]
+      set frame_info_cols {Frame Size a b c i j k}
+      set frame_info_widths {5 9 1 1 1 1 1 1}
+    }
+  }
 
+  Print_Table "ID3 Header Info" {Field Value} {30 8} $fields
   puts {}
-  Print_Table "Frame Header Info" \
-    {Frame Size a b c i j k} \
-    {5     9    1 1 1 1 1 1} \
-    $headertbl
-  puts \
+  Print_Table "Frame Header Info" $frame_info_cols $frame_info_widths $headertbl
+
+  if {$version eq "2.3.0"} {
+    puts \
 "
 Flags
 --------------------------------------------------
@@ -356,6 +413,7 @@ k - Grouping identity
       0   Frame does not contain group information
       1   Frame contains group information
 "
+  }
 }
 
 if {[Get_Setting dump_cover]} {
